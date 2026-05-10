@@ -263,13 +263,14 @@ export default function ChatbotLead() {
     setEnviando(true);
     try {
       await criarLead({
-        nome:            dados.nome,
-        email:           dados.email,
-        telefone:        dados.telefone,
-        canal_origem:    canal,
+        nome: dados.nome,
+        email: dados.email,
+        telefone: dados.telefone,
+        cpf: dados.cpf || null,
+        canal_origem: canal,
         id_procedimento: procSel?.id_procedimento || null,
-        id_medico_pref:  medSel?.id_medico        || null,
-      });
+        id_medico_pref: medSel?.id_medico || null,
+});
       setEtapa("sucesso");
     } catch {
       setErro("Erro ao enviar. Verifique sua conexão e tente novamente.");

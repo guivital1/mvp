@@ -506,7 +506,7 @@ def listar_leads():
     with conectar() as conn:
         base_q = (
             "SELECT l.id_lead, l.nome, l.canal_origem, l.status_lead, l.data_entrada, "
-            "l.telefone, p.nome_especifico, m.nome_medico, c.nome "
+            "l.telefone, l.cpf, p.nome_especifico, m.nome_medico, c.nome "
             "FROM leads l "
             "LEFT JOIN procedimentos p ON l.id_procedimento=p.id_procedimento "
             "LEFT JOIN medicos m ON l.id_medico_pref=m.id_medico "
@@ -532,17 +532,17 @@ def listar_leads():
         "novo":"🔵","em atendimento":"🟡",
         "convertido":"🟢","perdido":"🔴","reagendado":"🟠"
     }
-    for lid, nome, canal, status, entrada, tel, proc, med, oper in rows:
+    for lid, nome, canal, status, entrada, tel, cpf, proc, med, oper in rows:
         cor   = cores.get(status, C.GRAY)
         icone = icones.get(status, "⚪")
-        print(f"\n  {icone} {C.BOLD}[{lid}] {nome}{C.RESET}  |  {canal or '-'}  |  Tel: {tel or '-'}")
+        print(f"\n  {icone} {C.BOLD}[{lid}] {nome}{C.RESET}  |  {canal or '-'}  |  Tel: {tel or '-'}  |  CPF: {cpf or '-'}")
         print(f"       Status: {cor}{status}{C.RESET}  |  Entrada: {entrada}")
         print(f"       Procedimento: {proc or '-'}  |  Médico pref.: {med or '-'}")
         print(f"       Operador: {oper or 'Não atribuído'}")
 
     if _confirmar("\n  Exportar para CSV? (s/n): "):
         _exportar_csv("leads.csv",
-                      ["id","nome","canal","status","entrada","telefone","procedimento","medico","operador"],
+                      ["id","nome","canal","status","entrada","telefone","cpf","procedimento","medico","operador"],
                       rows)
 
 
@@ -552,15 +552,15 @@ def buscar_lead():
     termo = input("  Nome ou telefone: ").strip()
     with conectar() as conn:
         rows = conn.execute(
-            "SELECT id_lead, nome, canal_origem, status_lead, telefone, data_entrada "
-            "FROM leads WHERE nome LIKE ? OR telefone LIKE ? ORDER BY data_entrada DESC",
-            (f"%{termo}%", f"%{termo}%")
+            "SELECT id_lead, nome, canal_origem, status_lead, telefone, cpf, data_entrada "
+            "FROM leads WHERE nome LIKE ? OR telefone LIKE ? OR cpf LIKE ? ORDER BY data_entrada DESC",
+            (f"%{termo}%", f"%{termo}%", f"%{termo}%")
         ).fetchall()
     if not rows:
         aviso("Nenhum lead encontrado.")
         return
-    for lid, nome, canal, status, tel, entrada in rows:
-        print(f"  {C.GRAY}[{lid}]{C.RESET} {C.BOLD}{nome}{C.RESET}  |  {canal or '-'}  |  {tel or '-'}  |  {status}  |  {entrada}")
+    for lid, nome, canal, status, tel, cpf, entrada in rows:
+        print(f"  {C.GRAY}[{lid}]{C.RESET} {C.BOLD}{nome}{C.RESET}  |  {canal or '-'}  |  {tel or '-'}  | CPF: {cpf or '-'} |  {status}  |  {entrada}")
 
 
 def cadastrar_lead():
@@ -576,6 +576,8 @@ def cadastrar_lead():
     id_proc = input("  ID do procedimento de interesse (ou Enter): ").strip()
     id_med  = input("  ID do médico de preferência (ou Enter): ").strip()
     id_oper = input("  ID do operador responsável (ou Enter): ").strip()
+    cpf = input("  CPF (somente números, opcional): ").strip()
+    cpf = "".join(ch for ch in cpf if ch.isdigit()) or None
 
     if not nome:
         erro("Nome obrigatório.")
@@ -583,13 +585,14 @@ def cadastrar_lead():
 
     with conectar() as conn:
         conn.execute(
-            "INSERT INTO leads (nome, email, canal_origem, telefone, id_procedimento, "
-            "id_medico_pref, id_operador, status_lead, data_entrada) VALUES (?,?,?,?,?,?,?,'novo',?)",
-            (nome, email or None, canal or None, tel or None,
+            "INSERT INTO leads (nome, email, canal_origem, telefone, cpf, id_procedimento, "
+            "id_medico_pref, id_operador, status_lead, data_entrada) VALUES (?,?,?,?,?,?,?,?, 'novo', ?)",
+            (nome, email or None, canal or None, tel or None, cpf,
              int(id_proc) if id_proc.isdigit() else None,
              int(id_med)  if id_med.isdigit()  else None,
              int(id_oper) if id_oper.isdigit() else None,
-             datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
         )
     ok("Lead cadastrado.")
 

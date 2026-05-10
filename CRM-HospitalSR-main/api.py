@@ -390,7 +390,26 @@ def criar_paciente(dados: PacienteCreate):
         raise HTTPException(status_code=409, detail="CPF ou e-mail já cadastrado.")
 
 
-@app.delete("/pacientes/{id_paciente}", tags=["Pacientes"])
+@app.patch("/pacientes/{id_paciente}", tags=["Pacientes"])
+def atualizar_paciente(id_paciente: int, body: dict):
+    """Atualiza dados editáveis do paciente sem apagar registros vinculados."""
+    with conectar() as conn:
+        if not conn.execute("SELECT 1 FROM pacientes WHERE id_paciente=?", (id_paciente,)).fetchone():
+            raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+        campos = []
+        valores = []
+        if "telefone" in body: campos.append("telefone=?");  valores.append(body["telefone"])
+        if "peso"     in body: campos.append("peso=?");      valores.append(body["peso"])
+        if "altura"   in body: campos.append("altura=?");    valores.append(body["altura"])
+        if "senha"    in body: campos.append("senha=?");     valores.append(body["senha"])
+        if not campos:
+            raise HTTPException(status_code=422, detail="Nenhum campo para atualizar.")
+        valores.append(id_paciente)
+        conn.execute(f"UPDATE pacientes SET {', '.join(campos)} WHERE id_paciente=?", valores)
+    return {"mensagem": "Dados atualizados com sucesso."}
+
+
+
 def remover_paciente(id_paciente: int):
     """Remove um paciente e todos os dados vinculados."""
     with conectar() as conn:

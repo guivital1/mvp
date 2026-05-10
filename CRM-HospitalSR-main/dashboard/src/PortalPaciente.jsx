@@ -298,23 +298,40 @@ function MeusDados({ pac, onAtualizar }) {
     if (form.senha && form.senha.length < 6) { setErro("Senha mínima: 6 caracteres."); return; }
     setSalvando(true); setErro("");
     try {
-      const body = {
-        nome_completo:   pac.nome_completo,
-        cpf:             pac.cpf,
-        email:           pac.email,
-        senha:           form.senha || pac.senha,
-        telefone:        form.telefone || null,
-        sexo:            pac.sexo,
-        data_nascimento: pac.data_nascimento,
-        peso:            form.peso   ? parseFloat(form.peso)   : null,
-        altura:          form.altura ? parseFloat(form.altura) : null,
-      };
-      await http.delete(`/pacientes/${pac.id_paciente}`);
-      await http.post("/pacientes", body);
-      onAtualizar({ ...pac, ...body });
+      // Usa PATCH para atualizar só os campos editáveis
+      // sem apagar o paciente e seus dados vinculados
+      await http.post(`/pacientes/${pac.id_paciente}/atualizar`, {
+        telefone: form.telefone || null,
+        peso:     form.peso   ? parseFloat(form.peso)   : null,
+        altura:   form.altura ? parseFloat(form.altura) : null,
+        senha:    form.senha  || pac.senha,
+      });
+      onAtualizar({
+        ...pac,
+        telefone: form.telefone || pac.telefone,
+        peso:     form.peso   ? parseFloat(form.peso)   : pac.peso,
+        altura:   form.altura ? parseFloat(form.altura) : pac.altura,
+      });
       setEditando(false);
-    } catch (e) {
-      setErro("Erro ao atualizar dados.");
+    } catch {
+      // Fallback: tenta UPDATE direto via endpoint genérico
+      try {
+        await http.patch(`/pacientes/${pac.id_paciente}`, {
+          telefone: form.telefone || null,
+          peso:     form.peso   ? parseFloat(form.peso)   : null,
+          altura:   form.altura ? parseFloat(form.altura) : null,
+          senha:    form.senha  || pac.senha,
+        });
+        onAtualizar({
+          ...pac,
+          telefone: form.telefone || pac.telefone,
+          peso:     form.peso   ? parseFloat(form.peso)   : pac.peso,
+          altura:   form.altura ? parseFloat(form.altura) : pac.altura,
+        });
+        setEditando(false);
+      } catch {
+        setErro("Erro ao atualizar dados. Tente novamente.");
+      }
     } finally {
       setSalvando(false);
     }
@@ -695,15 +712,25 @@ function MeuSac({ pacId }) {
 // ══════════════════════════════════════════════════════════════════
 //  SEÇÃO: CHECKLIST PRÉ-CIRÚRGICO
 // ══════════════════════════════════════════════════════════════════
-function MeuPreCirurgico({ pacId, pacNome }) {
+
+const EXAMES_LISTA = [
+  { id: "hemograma",     label: "Hemograma completo",          desc: "Sangue completo com plaquetas" },
+  { id: "ecg",           label: "ECG (Eletrocardiograma)",     desc: "Avaliação cardíaca em repouso" },
+  { id: "coagulacao",    label: "Coagulação (TP/TTPA)",        desc: "Tempo de protrombina e tromboplastina" },
+  { id: "glicemia",      label: "Glicemia em jejum",           desc: "Nível de açúcar no sangue" },
+  { id: "renal",         label: "Ureia e Creatinina",          desc: "Função renal" },
+  { id: "rx_torax",      label: "Rx de tórax",                 desc: "Radiografia torácica" },
+  { id: "ultrassom",     label: "Ultrassom abdominal",         desc: "Exame de imagem abdominal" },
+  { id: "cardiologico",  label: "Avaliação cardiológica",      desc: "Parecer do cardiologista" },
+];
+
+function MeuPreCirurgico({ pacId }) {
   const [chk, setChk]           = useState(null);
   const [loading, setLoading]   = useState(true);
   const [showEnvio, setShowEnvio] = useState(false);
-  const [form, setForm]         = useState({
-    exames:  "",
-    canal:   "WhatsApp",
-    obs:     "",
-  });
+  const [examesSel, setExamesSel] = useState({});
+  const [canal, setCanal]       = useState("WhatsApp");
+  const [obs, setObs]           = useState("");
   const [enviando, setEnviando] = useState(false);
   const [enviado, setEnviado]   = useState(false);
   const [erro, setErro]         = useState("");
@@ -718,20 +745,26 @@ function MeuPreCirurgico({ pacId, pacNome }) {
       .finally(() => setLoading(false));
   }, [pacId]);
 
-  const apto = chk && chk.status_imc && chk.exames_completos && chk.checklist_ok && chk.autorizacao_med;
+
+  const totalSel = Object.values(examesSel).filter(Boolean).length;
+
+  const toggleExame = (id) => setExamesSel(prev => ({ ...prev, [id]: !prev[id] }));
 
   const enviarNotificacao = async () => {
-    if (!form.exames.trim()) { setErro("Descreva quais exames você possui."); return; }
+    if (totalSel === 0) { setErro("Selecione pelo menos um exame."); return; }
     setErro(""); setEnviando(true);
     try {
-      const motivo = `[EXAMES PRÉ-CIRÚRGICOS] Paciente informa que possui os seguintes exames:\n\n${form.exames}\n\nCanal de envio: ${form.canal}\n${form.obs ? `\nObservação: ${form.obs}` : ""}`;
+      const listaExames = EXAMES_LISTA
+        .filter(e => examesSel[e.id])
+        .map(e => `• ${e.label}`)
+        .join("\n");
+      const motivo = `[EXAMES PRÉ-CIRÚRGICOS]\n\nO paciente informa que possui os seguintes exames:\n\n${listaExames}\n\nCanal de envio preferido: ${canal}${obs ? `\n\nObservação: ${obs}` : ""}`;
       await http.post("/sac", { id_paciente: pacId, motivo });
       setEnviado(true);
       setShowEnvio(false);
     } catch {
-      setErro("Erro ao enviar notificação. Tente novamente.");
-    } finally {
-      setEnviando(false); }
+      setErro("Erro ao enviar. Tente novamente.");
+    } finally { setEnviando(false); }
   };
 
   const ItemCheck = ({ ok, label, sub }) => (
@@ -749,6 +782,206 @@ function MeuPreCirurgico({ pacId, pacNome }) {
       </span>
     </div>
   );
+
+  return (
+    <div className="space-y-4">
+      <SectionTitle title="Pré-Cirúrgico" sub="Acompanhe sua aptidão e envie seus exames" />
+
+      {loading ? <Spinner /> : (
+        <>
+          {/* Status geral */}
+          {chk ? (
+            <div className={`rounded-2xl border p-5 text-center
+              ${apto ? "bg-emerald-500/10 border-emerald-500/30" : "bg-yellow-500/10 border-yellow-500/30"}`}>
+              <p className={`text-lg font-bold ${apto ? "text-emerald-400" : "text-yellow-400"}`}>
+                {apto ? "✅ Você está APTO(a) para a cirurgia!" : "⚠️ Situação: PENDENTE"}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {apto ? "Todos os critérios foram aprovados pelo hospital." : "Alguns itens aguardam aprovação da equipe médica."}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-center">
+              <FileText size={28} className="text-gray-700 mx-auto mb-2" />
+              <p className="text-gray-500 text-sm">Checklist ainda não iniciado.</p>
+              <p className="text-gray-600 text-xs mt-1">O hospital preencherá após sua consulta inicial.</p>
+            </div>
+          )}
+
+          {/* Itens do checklist */}
+          {chk && (
+            <div className="space-y-2">
+              <ItemCheck ok={!!chk.status_imc}      label="IMC dentro do limite aprovado"    sub="Avaliado pelo médico" />
+              <ItemCheck ok={!!chk.exames_completos} label="Exames pré-operatórios completos" sub="Hemograma, ECG, coagulação e outros" />
+              <ItemCheck ok={!!chk.checklist_ok}     label="Checklist de segurança aprovado"  sub="Alergias, medicamentos e protocolos" />
+              <ItemCheck ok={!!chk.autorizacao_med}  label="Autorização médica assinada"       sub="Termo de consentimento informado" />
+            </div>
+          )}
+
+          {/* Envio de exames */}
+          {!apto && (
+            <Card>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-9 h-9 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <FileText size={16} className="text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Informar meus exames</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Marque os exames que você já possui. O hospital será notificado para combinar o envio.
+                  </p>
+                </div>
+              </div>
+
+              {enviado ? (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
+                  <CheckCircle size={24} className="text-emerald-400 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-emerald-400">Notificação enviada!</p>
+                  <p className="text-xs text-gray-500 mt-1">Nossa equipe entrará em contato em breve.</p>
+                </div>
+              ) : showEnvio ? (
+                <div className="space-y-4">
+
+                  {/* Checklist de exames */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Marque os exames que você possui ({totalSel}/{EXAMES_LISTA.length} selecionado{totalSel !== 1 ? "s" : ""}):
+                    </p>
+                    <div className="space-y-2">
+                      {EXAMES_LISTA.map(e => (
+                        <div
+                          key={e.id}
+                          onClick={() => toggleExame(e.id)}
+                          className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all
+                            ${examesSel[e.id]
+                              ? "bg-blue-500/10 border-blue-500/30"
+                              : "bg-gray-800/40 border-gray-700 hover:border-gray-600"
+                            }`}
+                        >
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
+                            ${examesSel[e.id] ? "bg-blue-500 border-blue-500" : "border-gray-600"}`}>
+                            {examesSel[e.id] && (
+                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <p className={`text-sm font-medium ${examesSel[e.id] ? "text-blue-400" : "text-gray-300"}`}>
+                              {e.label}
+                            </p>
+                            <p className="text-xs text-gray-600">{e.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Selecionar todos */}
+                  <button
+                    onClick={() => {
+                      const todos = totalSel === EXAMES_LISTA.length;
+                      const novo = {};
+                      EXAMES_LISTA.forEach(e => { novo[e.id] = !todos; });
+                      setExamesSel(novo);
+                    }}
+                    className="text-xs text-blue-400 hover:underline"
+                  >
+                    {totalSel === EXAMES_LISTA.length ? "Desmarcar todos" : "Selecionar todos"}
+                  </button>
+
+                  {/* Canal de envio */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Como prefere enviar os exames?</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: "WhatsApp",   label: "WhatsApp",   emoji: "💬" },
+                        { id: "E-mail",     label: "E-mail",     emoji: "📧" },
+                        { id: "Presencial", label: "Presencial", emoji: "🏥" },
+                      ].map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => setCanal(c.id)}
+                          className={`py-2.5 rounded-xl border text-xs font-medium transition-all
+                            ${canal === c.id
+                              ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                              : "border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300"
+                            }`}
+                        >
+                          {c.emoji} {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Observação */}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5">Observações (opcional)</label>
+                    <textarea
+                      value={obs}
+                      onChange={e => setObs(e.target.value)}
+                      placeholder="ex: Prefiro ser contatado pela manhã, meu número é (11) 99999-9999..."
+                      rows={2}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors resize-none"
+                    />
+                  </div>
+
+                  {erro && <p className="text-red-400 text-xs">{erro}</p>}
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setShowEnvio(false); setErro(""); }}
+                      className="flex-1 py-2.5 rounded-xl border border-gray-700 text-gray-400 text-sm hover:border-gray-500 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={enviarNotificacao}
+                      disabled={enviando || totalSel === 0}
+                      className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50"
+                    >
+                      {enviando ? "Enviando..." : `Notificar Hospital (${totalSel})`}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowEnvio(true)}
+                  className="w-full py-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 text-sm font-medium hover:bg-blue-500/20 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Plus size={14} />
+                  Informar que tenho os exames
+                </button>
+              )}
+            </Card>
+          )}
+
+          {!apto && !enviado && (
+            <p className="text-xs text-gray-600 text-center px-4">
+              Após informar seus exames, nossa equipe entrará em contato em até 48h para combinar o envio.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+
+  useEffect(() => {
+    http.get("/pre-cirurgico")
+      .then(r => {
+        const lista = r.data.checklists || [];
+        setChk(lista.find(c => c.id_paciente === pacId) || null);
+      })
+      .catch(() => setChk(null))
+      .finally(() => setLoading(false));
+  }, [pacId]);
+
+  const apto = chk && chk.status_imc && chk.exames_completos && chk.checklist_ok && chk.autorizacao_med;
+
+  
+
+ 
 
   return (
     <div className="space-y-4">
